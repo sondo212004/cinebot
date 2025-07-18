@@ -1,0 +1,49 @@
+# Core dependencies
+pandas
+numpy
+
+# Kaggle integration
+kagglehub
+
+# Gradio for web interface
+gradio
+
+# LangChain ecosystem
+langchain
+langchain-openai
+langchain-chroma
+langchain-community
+langchain-tavily
+langchain-huggingface
+
+# Vector DB
+chromadb
+
+# Embeddings & NLP
+sentence-transformers
+transformers
+torch
+tiktoken
+
+# OpenAI SDK
+openai
+
+# Environment & config
+python-dotenv
+
+# Web scraping
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==4.9.3
+urllib3==2.1.0
+selenium==4.15.0
+fake-useragent==1.4.0
+
+# Optional: For TMDB API (comment/uncomment as needed)
+# tmdbv3api==1.7.7
+
+# Optional: For News API (comment/uncomment as needed)
+# newsapi-python==0.2.6
+
+# Others
+webdriver-manager
