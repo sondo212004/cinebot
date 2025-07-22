@@ -72,7 +72,8 @@ CineBot được xây dựng trên một kiến trúc module, cho phép mở r�
     ```
     OPENAI_API_KEY="your_openai_api_key"
     TAVILY_API_KEY="your_tavily_api_key"
-    # Có thể thêm các biến khác nếu cần cho Nominatim/TMDB nếu chúng yêu cầu key
+    HF_TOKEN="your_hf_token"
+    TMDB_API_KEY="your_tmbd_api_key"
     ```
 
 5.  **Chạy Chatbot:**
