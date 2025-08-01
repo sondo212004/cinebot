@@ -47,3 +47,24 @@ fake-useragent==1.4.0
 
 # Others
 webdriver-manager
+
+# langgraph (update)
+langgraph
+
+# langsmith
+langsmith
+
+# MCP
+mcp-use
+langchain-mcp-adapters
+
+# playwright
+playwright
+# Tải về các trình duyệt cần thiết (Chromium, Firefox, WebKit)
+playwright install
+
+# pydantic
+pydantic
+
+#fastapi
+fastapi

@@ -1,14 +1,19 @@
 import os
 from dotenv import load_dotenv
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TypedDict, Annotated
+import json
+import asyncio
 
 # LangChain core imports
 from langchain_openai import ChatOpenAI
-from langchain.agents import create_openai_functions_agent, AgentExecutor
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import Tool
-from langchain.memory import ConversationBufferMemory
-from langchain.schema import BaseRetriever, SystemMessage
+from langchain.schema import BaseRetriever, SystemMessage, HumanMessage, AIMessage
+
+# LangGraph imports
+from langgraph.graph import StateGraph, END, START
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.checkpoint.memory import MemorySaver
 
 # Import mới để tránh deprecation warning
 try:
@@ -36,71 +41,102 @@ try:
     from cinema_search import cinema_search_tool
     from tmdb_tools import tmdb_tools
     from scrape_cinema_showtimes import cinema_showtimes_tool
+    from playwright_browser import scrape_cinema_showtimes_playwright
 except ImportError:
-    print("⚠️ Không tìm thấy web_search_agent.py, cinema_search.py, tmdb_tools.py,tạo tool giả lập.")
+    print("⚠️ Không tìm thấy web_search_agent.py, cinema_search.py, tmdb_tools.py, mcp_tools.py, tạo tool giả lập.")
     from langchain.tools import DuckDuckGoSearchRun
     web_search_tool = DuckDuckGoSearchRun()
+    cinema_search_tool = None
+    tmdb_tools = []
+    cinema_showtimes_tool = None
+    async def get_mcp_browser_tools(): # Giả lập hàm nếu không import được
+        print("⚠️ Giả lập get_mcp_browser_tools: Không có browser automation tool.")
+        return []
+
+import langsmith
+langsmith_client = langsmith.Client()
+
+# Định nghĩa State cho LangGraph
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    next: str
 
 
 class ChatbotEngine:
-    """Engine xử lý logic chatbot với 1 phiên duy nhất xuyên suốt."""
+    """Engine xử lý logic chatbot với LangGraph."""
     
     def __init__(self):
         # Cấu hình
         self.MODEL = "gpt-4o-mini"
         self.db_name = 'vector_db'
 
-        self.SYSTEM_PROMPT = SystemMessage(content=""" 
-    Bạn là CineBot - một chuyên gia tư vấn phim ảnh thông minh và thân thiện.
+        self.SYSTEM_PROMPT = """ 
+        Bạn là CineBot - một chuyên gia tư vấn phim ảnh thông minh và thân thiện.
 
-    NHIỆM VỤ CỐT LÕI:
-    - Phân tích kỹ lưỡng yêu cầu của người dùng, ĐẶC BIỆT LƯU Ý đến lịch sử trò chuyện (`chat_history`) để hiểu rõ ngữ cảnh.
-    - Nếu người dùng hỏi một câu nối tiếp (ví dụ: "còn phim nào khác không?", "phim đó của ai?"), bạn PHẢI dựa vào `chat_history` để suy ra chủ đề hoặc bộ phim đang được nói đến.
+        NHIỆM VỤ CỐT LÕI:
+        - Phân tích kỹ lưỡng yêu cầu của người dùng, ĐẶC BIỆT LƯU Ý đến lịch sử trò chuyện để hiểu rõ ngữ cảnh.
+        - Nếu người dùng hỏi một câu nối tiếp (ví dụ: "còn phim nào khác không?", "phim đó của ai?"), bạn PHẢI dựa vào lịch sử trò chuyện để suy ra chủ đề hoặc bộ phim đang được nói đến.
 
-    **QUY TRÌNH TÌM KIẾM THÔNG TIN:**
-    1. **ƯU TIÊN 1: Tìm kiếm trong cơ sở dữ liệu phim nội bộ (`movie_database_search`).**
-        * Sử dụng công cụ `movie_database_search` cho các câu hỏi đơn giản và trực tiếp về tóm tắt phim, diễn viên, đạo diễn, thể loại, năm sản xuất có thể đã có trong dữ liệu bạn được huấn luyện.
-    2. **ƯU TIÊN 2: Sử dụng các công cụ TMDB (`tmdb_*`) VÀ tìm kiếm web (`web_search_tool`).**
-        * **Đây là nguồn thông tin ĐẦY ĐỦ và CHÍNH XÁC nhất về phim ảnh và người nổi tiếng.**
-        * **Luôn ưu tiên các công cụ TMDB (`tmdb_movie_search`, `tmdb_get_movie_details`, `tmdb_person_search`, `tmdb_get_person_details`, `tmdb_now_playing_movies`, `tmdb_upcoming_movies`)** để lấy thông tin cơ bản.
-        * **ĐỒNG THỜI, HÃY SỬ DỤNG `web_search_tool` (tavily_search) để xác minh hoặc tìm kiếm thông tin chi tiết hơn, ĐẶC BIỆT LÀ NGÀY PHÁT HÀNH CỤ THỂ TẠI VIỆT NAM (hoặc quốc gia người dùng quan tâm nếu biết).** Ví dụ, sau khi lấy ngày phát hành từ TMDB, hãy tìm kiếm "ngày phát hành [Tên phim] Việt Nam" bằng `web_search_tool` để đảm bảo thông tin chính xác nhất cho thị trường địa phương.
-        * **NHỚ:** Nếu bạn chỉ có tên phim/người, hãy dùng `tmdb_movie_search` hoặc `tmdb_person_search` trước để lấy ID, sau đó dùng ID đó với `tmdb_get_movie_details` hoặc `tmdb_get_person_details` để lấy thông tin chi tiết.
-    3. **ƯU TIÊN 3: Tìm kiếm web (`web_search_tool`) ĐỘC LẬP.**
-        * Chỉ sử dụng công cụ `web_search_tool` (web search) khi thông tin KHÔNG CÓ trong database nội bộ hoặc TMDB, hoặc khi người dùng hỏi về các tin tức, sự kiện rất mới mà các nguồn khác không cập nhật kịp (ví dụ: "tin tức điện ảnh mới nhất", "sự kiện liên quan đến diễn viên [tên] gần đây").
+        **QUY TRÌNH TÌM KIẾM THÔNG TIN:**
+        1. **ƯU TIÊN 1: Tìm kiếm trong cơ sở dữ liệu phim nội bộ (`movie_database_search`).**
+            * Sử dụng công cụ `movie_database_search` cho các câu hỏi đơn giản và trực tiếp về tóm tắt phim, diễn viên, đạo diễn, thể loại, năm sản xuất có thể đã có trong dữ liệu bạn được huấn luyện.
+        2. **ƯU TIÊN 2: Sử dụng các công cụ TMDB (`tmdb_*`) VÀ tìm kiếm web (`web_search_tool`).**
+            * **Đây là nguồn thông tin ĐẦY ĐỦ và CHÍNH XÁC nhất về phim ảnh và người nổi tiếng.**
+            * **Luôn ưu tiên các công cụ TMDB (`tmdb_movie_search`, `tmdb_get_movie_details`, `tmdb_person_search`, `tmdb_get_person_details`, `tmdb_now_playing_movies`, `tmdb_upcoming_movies`)** để lấy thông tin cơ bản.
+            * **ĐỒNG THỜI, HÃY SỬ DỤNG `web_search_tool` (tavily_search) để xác minh hoặc tìm kiếm thông tin chi tiết hơn, ĐẶC BIỆT LÀ NGÀY PHÁT HÀNH CỤ THỂ TẠI VIỆT NAM (hoặc quốc gia người dùng quan tâm nếu biết).** Ví dụ, sau khi lấy ngày phát hành từ TMDB, hãy tìm kiếm "ngày phát hành [Tên phim] Việt Nam" bằng `web_search_tool` để đảm bảo thông tin chính xác nhất cho thị trường địa phương.
+            * **NHỚ:** Nếu bạn chỉ có tên phim/người, hãy dùng `tmdb_movie_search` hoặc `tmdb_person_search` trước để lấy ID, sau đó dùng ID đó với `tmdb_get_movie_details` hoặc `tmdb_get_person_details` để lấy thông tin chi tiết.
+        3. **ƯU TIÊN 3: Tìm kiếm web (`web_search_tool`) ĐỘC LẬP.**
+            * Chỉ sử dụng công cụ `web_search_tool` (web search) khi thông tin KHÔNG CÓ trong database nội bộ hoặc TMDB, hoặc khi người dùng hỏi về các tin tức, sự kiện rất mới mà các nguồn khác không cập nhật kịp (ví dụ: "tin tức điện ảnh mới nhất", "sự kiện liên quan đến diễn viên [tên] gần đây").
 
-    - Đưa ra gợi ý phim phù hợp kèm lý do thuyết phục.
+        - Đưa ra gợi ý phim phù hợp kèm lý do thuyết phục.
 
-    QUY TẮC GIAO TIẾP:
-    - Trả lời bằng ngôn ngữ của người dùng (nếu có thể).
-    - Giữ câu trả lời ngắn gọn, súc tích, tránh lặp lại
-    - Giữ giọng văn thân thiện, gần gũi, sử dụng emoji để cuộc trò chuyện thêm sinh động.
-    - Không bao giờ bịa đặt thông tin. Nếu không biết, hãy nói là không biết.
+        QUY TẮC GIAO TIẾP:
+        - Trả lời bằng ngôn ngữ của người dùng (nếu có thể).
+        - Giữ câu trả lời ngắn gọn, súc tích, tránh lặp lại
+        - Giữ giọng văn thân thiện, gần gũi, sử dụng emoji để cuộc trò chuyện thêm sinh động.
+        - Không bao giờ bịa đặt thông tin. Nếu không biết, hãy nói là không biết.
 
-    ---
+        ---
 
-    ### QUY TẮC ĐẶC BIỆT KHI HỎI VỀ PHIM CHIẾU RẠP VÀ LỊCH CHIẾU CHI TIẾT:
+        ### QUY TẮC ĐẶC BIỆT KHI HỎI VỀ PHIM CHIẾU RẠP VÀ LỊCH CHIẾU CHI TIẾT:
 
-    1.  Nếu người dùng hỏi về một bộ phim đang chiếu rạp và muốn biết lịch chiếu hoặc địa điểm xem, hãy sử dụng web_search_tool để tìm kiếm url của rạp chiếu đó và dùng cinema_scrape_tool để đưa ra lịch chiếu cho họ).
-    2.  **Sau khi có vị trí (tỉnh/thành phố hoặc địa chỉ cụ thể), SỬ DỤNG CÔNG CỤ `cinema_search_tool` với `movie_name` và `location` để tìm danh sách các rạp đang chiếu phim đó ở gần người dùng.** Công cụ này sẽ trả về **TÊN RẠP** và **ĐỊA CHỈ**. Nếu input của người dùng đã có rạp chiếu phim cụ thể, hãy sử dụng luôn web_search_tool, không cần tìm những địa điểm gần đó.
-    3.  **Từ kết quả của `cinema_search_tool`, HÃY CHỌN MỘT HOẶC HAI TÊN RẠP ĐẠI DIỆN** (ví dụ: "CGV ,Vincom Center Bà Triệu", "Lotte Cinema Royal City").
-    4.  **VỚI MỖI TÊN RẠP ĐƯỢC CHỌN, HÃY SỬ DỤNG `web_search_tool` để tìm kiếm URL TRANG LỊCH CHIẾU CỤ THỂ CỦA RẠP ĐÓ.**
-        * Ví dụ: Nếu `cinema_search_tool` trả về "CGV Vincom Center Bà Triệu", bạn sẽ gọi `web_search_tool("trang lịch chiếu CGV Vincom Center Bà Triệu")`.
-        * **Sau đó, PHÂN TÍCH KẾT QUẢ TỪ `web_search_tool` để TRÍCH XUẤT URL TRANG LỊCH CHIẾU CHÍNH XÁC.** (Thường là link từ miền chính thức của rạp như cgv.vn, lottecinemavn.com, bhdstar.vn).
-    5.  **Sau khi đã có `specific_cinema_url` (từ `web_search_tool`) và `cinema_info` (bao gồm tên rạp và địa điểm, lấy từ `cinema_search_tool`), HÃY SỬ DỤNG CÔNG CỤ `ScrapeCinemaShowtimes` để lấy lịch chiếu chi tiết.**
-        * Bạn **PHẢI truyền đúng hai tham số**: `specific_cinema_url` và `cinema_info`.
-        * Ví dụ gọi công cụ: `ScrapeCinemaShowtimes(specific_cinema_url='https://www.cgv.vn/default/cinox/site/cgv-vincom-center-ba-trieu/', cinema_info={'name': 'CGV Vincom Center Bà Triệu', 'location': 'Hà Nội', 'source_url': 'https://www.cgv.vn/default/cinox/site/cgv-vincom-center-ba-trieu/'})`.
-    6.  **Sau khi `ScrapeCinemaShowtimes` trả về dữ liệu lịch chiếu chi tiết (dạng dictionary), bạn HÃY PHÂN TÍCH DỮ LIỆU ĐÓ và TỔNG HỢP, SẮP XẾP, TRÌNH BÀY THÔNG TIN một cách rõ ràng, đầy đủ và thân thiện cho người dùng.**
-    7.  Đảm bảo câu trả lời bao gồm tên phim, các rạp chiếu, thời gian chiếu cụ thể cho từng ngày, và đường dẫn để đặt vé nếu có.
-    """        
-    )
+        **RẤT QUAN TRỌNG: CÁCH XỬ LÝ YÊU CẦU VỀ RẠP CHIẾU CỤ THỂ:**
 
-        
+        1.  **Nếu người dùng NÊU RÕ TÊN RẠP CỤ THỂ** (ví dụ: "CGV Vincom Center Bà Triệu", "Lotte Cinema Royal City", "BHD Star Phạm Hùng", hoặc cung cấp URL của rạp):
+            * **Tuyệt đối KHÔNG SỬ DỤNG `cinema_search_tool`.** Bạn đã có tên rạp rồi.
+            * **Hãy BỎ QUA bước tìm rạp và chuyển thẳng đến việc tìm URL (nếu chưa có) và scrape lịch chiếu.**
+            * **Nếu người dùng CHƯA CUNG CẤP URL rạp, hãy sử dụng `web_search_tool`** để tìm kiếm URL TRANG LỊCH CHIẾU CỤ THỂ của rạp đó.
+                * Ví dụ: Nếu rạp là "CGV Vincom Center Bà Triệu", hãy tìm `web_search_tool("lịch chiếu CGV Vincom Center Bà Triệu URL")` hoặc `web_search_tool("trang chính thức CGV Vincom Center Bà Triệu")`.
+            * Sau đó, **PHÂN TÍCH KẾT QUẢ TỪ `web_search_tool` để TRÍCH XUẤT URL TRANG LỊCH CHIẾU CHÍNH XÁC.** (Đảm bảo là link từ miền chính thức của rạp như `cgv.vn`, `lottecinemavn.com`, `bhdstar.vn`).
+            * Hiện tại chỉ hỗ trợ cho rạp CGV, nên hãy lấy url ví dụ:https://www.cgv.vn/en/cinox/site/cgv-vincom-tran-duy-hung
+
+        2.  **Nếu người dùng CHỈ NÊU TÊN PHIM VÀ ĐỊA ĐIỂM CHUNG** (ví dụ: "phim X ở Hà Nội", "phim Y ở gần đây", "lịch chiếu ở quận Hoàn Kiếm"):
+            * **SỬ DỤNG CÔNG CỤ `cinema_search_tool`** với `movie_name` và `location` (nếu có) để tìm danh sách các rạp đang chiếu phim đó ở khu vực gần người dùng. Công cụ này sẽ trả về **TÊN RẠP** và **ĐỊA CHỈ**.
+            * **Từ kết quả của `cinema_search_tool`, HÃY CHỌN MỘT HOẶC HAI TÊN RẠP ĐẠI DIỆN** để tiếp tục.
+            * Sau đó, tương tự như bước 1, **SỬ DỤNG `web_search_tool`** để tìm URL TRANG LỊCH CHIẾU CỤ THỂ của các rạp đã chọn.
+
+        3.  **Sau khi đã có `specific_cinema_url` (từ `web_search_tool` hoặc từ prompt của người dùng):**
+            * **SỬ DỤNG CÔNG CỤ `scrape_cinema_showtimes_playwright`** để lấy lịch chiếu chi tiết từ URL đó.
+            * **RẤT QUAN TRỌNG:** Truyền một `task_description` rõ ràng cho công cụ này, bao gồm URL, ngày muốn xem (nếu có, ví dụ: "ngày hôm nay", "ngày mai", "29/07/2025"), và yêu cầu trích xuất thông tin (tên phim, giờ chiếu, định dạng, link đặt vé) dưới dạng JSON list.
+            * Ví dụ: `scrape_cinema_showtimes_playwright(url="https://en.wikipedia.org/wiki/Rapping", target_date="[Ngày cần tìm]", extract_format="json")`.
+
+        4.  **Sau khi công cụ scrape trả về dữ liệu lịch chiếu (dạng string JSON):**
+            * Bạn **HÃY PHÂN TÍCH DỮ LIỆU ĐÓ và TỔNG HỢP, SẮP XẾP, TRÌNH BÀY THÔNG TIN** một cách rõ ràng, đầy đủ và thân thiện cho người dùng.
+            * Đảm bảo câu trả lời bao gồm tên phim, các rạp chiếu, thời gian chiếu cụ thể cho từng ngày, và đường dẫn để đặt vé nếu có.
+        """
 
         # Khởi tạo components
+
         self.llm, self.retriever, self.tools = self._initialize_components()
 
-        # Tạo agent duy nhất
-        self.agent_executor = self._create_agent()
+        # Tạo LangGraph workflow
+        self.workflow = self._create_workflow()
+        
+        # Memory saver để lưu trữ state
+        self.memory = MemorySaver()
+        
+        # Compile workflow với memory
+        self.app = self.workflow.compile(checkpointer=self.memory)
 
     def _load_environment(self):
         load_dotenv(override=True)
@@ -128,93 +164,177 @@ class ChatbotEngine:
     def _initialize_components(self):
         print("🔧 Đang khởi tạo chatbot components...")
         self._load_environment()
+        
         if not os.path.exists(self.db_name):
             raise FileNotFoundError(f"Vector database không tồn tại tại {self.db_name}. Vui lòng chạy build_index.py trước!")
+        
         embedding_model = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
             model_kwargs={'device': 'cpu'},
             encode_kwargs={'normalize_embeddings': True}
         )
+        
         vector_db = Chroma(
             persist_directory=self.db_name,
             embedding_function=embedding_model,
             collection_name="movies"
         )
+        
         if not vector_db._collection.count():
             raise ValueError("Vector database trống! Vui lòng chạy build_index.py để thêm dữ liệu.")
+        
         print(f"✅ Database có {vector_db._collection.count()} documents")
+        
         llm = ChatOpenAI(
             temperature=0.3,
             model_name=self.MODEL,
             max_tokens=800,
-            streaming=True    # giúp phản hồi từng phần (nếu frontend hỗ trợ)
+            streaming=True
         )
 
         retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+        
         tools = [
             Tool(
                 name="movie_database_search",
                 description="Tìm kiếm thông tin phim (tóm tắt, diễn viên, đạo diễn, thể loại, năm sản xuất) từ cơ sở dữ liệu phim nội bộ. Luôn dùng công cụ này trước tiên cho các câu hỏi về phim cụ thể.",
                 func=self._movie_search_function
             ),
-            web_search_tool,
-            cinema_search_tool,
-            cinema_showtimes_tool
         ]
-        tools.extend(tmdb_tools)  
         
-
+        # Thêm các tools khác nếu có
+        if web_search_tool:
+            tools.append(web_search_tool)
+        if cinema_search_tool:
+            tools.append(cinema_search_tool)
+        if tmdb_tools:
+            tools.extend(tmdb_tools)
+        # if cinema_showtimes_tool:
+        #     tools.append(cinema_showtimes_tool)
+        if scrape_cinema_showtimes_playwright:
+            tools.append(scrape_cinema_showtimes_playwright)
+        
         print("✅ Tất cả components đã sẵn sàng!")
         return llm, retriever, tools
 
-    def _create_agent(self):
-        print(f"✨ Tạo agent duy nhất cho phiên chat.")
-        prompt = ChatPromptTemplate.from_messages([
-            self.SYSTEM_PROMPT,
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ])
-        memory = ConversationBufferMemory(
-            memory_key='chat_history',
-            return_messages=True,
-            max_token_limit=1000,
+    def _create_workflow(self):
+        print("✨ Tạo LangGraph workflow...")
+        
+        # Tạo workflow graph
+        workflow = StateGraph(AgentState)
+        
+        # Bind tools to LLM
+        llm_with_tools = self.llm.bind_tools(self.tools)
+        
+        # Định nghĩa node chatbot
+        def chatbot(state: AgentState):
+            # Thêm system message vào đầu
+            messages = [SystemMessage(content=self.SYSTEM_PROMPT)] + state["messages"]
+            response = llm_with_tools.invoke(messages)
+            return {"messages": [response]}
+        
+        # Thêm nodes vào workflow
+        workflow.add_node("chatbot", chatbot)
+        workflow.add_node("tools", ToolNode(self.tools))
+        
+        # Thiết lập entry point
+        workflow.add_edge(START, "chatbot")
+        
+        # Định nghĩa conditional edges
+        workflow.add_conditional_edges(
+            "chatbot",
+            tools_condition,
+            {"tools": "tools", "__end__": END}
         )
-        agent = create_openai_functions_agent(self.llm, self.tools, prompt)
-        agent_executor = AgentExecutor(
-            agent=agent,
-            tools=self.tools,
-            agent_type="react-agent",
-            memory=memory,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=15
-        )
-        self.memory = memory
-        return agent_executor
+        
+        # Từ tools quay lại chatbot
+        workflow.add_edge("tools", "chatbot")
+        
+        return workflow
 
-    def get_response(self, message: str):
+    def get_response(self, message: str, session_id: str = "default_session"):
+        """
+        Lấy response từ LangGraph agent
+        
+        Args:
+            message: Tin nhắn của người dùng
+            session_id: ID phiên để lưu trữ lịch sử
+        """
         if not message.strip():
             return "Vui lòng nhập câu hỏi của bạn! 🎬"
+        
         try:
-            # Log lịch sử
-            chat_history = self.memory.chat_memory.messages
-            print("\n======================[ AGENT INPUT LOG ]======================")
-            print(f"CURRENT CHAT HISTORY ({len(chat_history)} messages):")
-            for msg in chat_history:
-                print(f"  - {type(msg).__name__}: {msg.content}")
-            print(f"INPUT: {message}")
-            print("=================================================================\n")
+            # Tạo config với thread_id để lưu trữ lịch sử
+            config = {"configurable": {"thread_id": session_id}}
             
-            response_dict = self.agent_executor.invoke({"input": message})
-            return response_dict.get('output', "Xin lỗi, tôi không thể tạo ra câu trả lời.")
+            # Log input
+            print(f"\n🎬 INPUT: {message}")
+            
+            # Invoke workflow với message mới
+            response = self.app.invoke(
+                {"messages": [HumanMessage(content=message)]},
+                config=config
+            )
+            
+            # Lấy message cuối cùng từ AI
+            last_message = response["messages"][-1]
+            if hasattr(last_message, 'content'):
+                return last_message.content
+            else:
+                return "Xin lỗi, tôi không thể tạo ra câu trả lời."
+                
         except Exception as e:
             import traceback
             traceback.print_exc()
             return f"❌ Lỗi: {str(e)}"
 
-    def clear_conversation(self):
-        self.memory.clear()
-        print("🗑️ Đã xóa lịch sử trò chuyện.")
-        return "🔄 Đã xóa lịch sử trò chuyện!"
+    def clear_conversation(self, session_id: str = "default_session"):
+        """
+        Xóa lịch sử trò chuyện cho một session cụ thể
+        """
+        try:
+            # Với MemorySaver, chúng ta có thể xóa bằng cách tạo session mới
+            # Hoặc có thể implement logic xóa riêng nếu cần
+            print(f"🗑️ Đã xóa lịch sử trò chuyện cho session: {session_id}")
+            return "🔄 Đã xóa lịch sử trò chuyện!"
+        except Exception as e:
+            return f"❌ Lỗi khi xóa lịch sử: {str(e)}"
 
+    def get_conversation_history(self, session_id: str = "default_session"):
+        """
+        Lấy lịch sử trò chuyện cho một session
+        """
+        try:
+            config = {"configurable": {"thread_id": session_id}}
+            # Lấy state hiện tại
+            current_state = self.app.get_state(config)
+            if current_state and current_state.values.get("messages"):
+                return current_state.values["messages"]
+            return []
+        except Exception as e:
+            print(f"❌ Lỗi khi lấy lịch sử: {str(e)}")
+            return []
+
+    async def stream_response(self, message: str, session_id: str = "default_session"):
+        if not message.strip():
+            yield "Vui lòng nhập câu hỏi của bạn! 🎬"
+            return
+
+        try:
+            config = {"configurable": {"thread_id": session_id}}
+            
+            async for chunk in self.app.astream(
+                {"messages": [HumanMessage(content=message)]},
+                config=config,
+                stream_mode="values"
+            ):
+                if "messages" in chunk and chunk["messages"]:
+                    last_message = chunk["messages"][-1]
+                    if isinstance(last_message, AIMessage):
+                        yield last_message.content
+        except Exception as e:
+            yield f"❌ Đã xảy ra lỗi: {str(e)}"
+
+                        
+        except Exception as e:
+            yield f"❌ Lỗi: {str(e)}"

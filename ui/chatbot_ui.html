@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineBot - Tư Vấn Phim Thông Minh</title>
+    <link rel="stylesheet" href="chatbot_ui.css">
+</head>
+
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="status-indicator"></div>
+            <h1>🎬 CineBot</h1>
+            <p>Chuyên gia tư vấn phim ảnh thông minh</p>
+            <div class="session-info">
+                <span>Session: <span id="session-id">...</span></span>
+                <div class="control-buttons">
+                    <div class="control-btn" onclick="clearHistory()">🗑️ Xóa lịch sử</div>
+                    <div class="control-btn" onclick="loadHistory()">📜 Tải lịch sử</div>
+                    <div class="control-btn" onclick="toggleStream()">
+                        <span id="stream-toggle">🔄 Stream: ON</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+            <div class="welcome-message">
+                <h3>Chào mừng đến với CineBot! 🎬</h3>
+                <p>Tôi có thể giúp bạn:</p>
+                <div class="quick-questions">
+                    <div class="quick-question" onclick="sendQuickQuestion('Gợi ý phim hay để xem cuối tuần')">🍿 Phim
+                        cuối tuần</div>
+                    <div class="quick-question" onclick="sendQuickQuestion('Phim chiếu rạp tại Hà Nội hôm nay')">🎭 Phim
+                        chiếu rạp</div>
+                    <div class="quick-question" onclick="sendQuickQuestion('Phim hành động hay nhất 2025')">⚡ Phim hành
+                        động 2024</div>
+                    <div class="quick-question" onclick="sendQuickQuestion('Thông tin về phim Avengers')">🦸 Thông tin
+                        phim</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-container">
+            <textarea class="chat-input" id="message-input" placeholder="Hỏi tôi về phim ảnh, lịch chiếu, diễn viên..."
+                rows="1" onkeydown="handleKeyDown(event)"></textarea>
+            <button class="send-button" id="send-button" onclick="sendMessage()">
+                ➤
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = 'http://localhost:8000';
+        let sessionId = generateSessionId();
+        let isStreaming = true;
+        let isLoading = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function () {
+            document.getElementById('session-id').textContent = sessionId.substring(0, 8);
+            autoResizeTextarea();
+        });
+
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function autoResizeTextarea() {
+            const textarea = document.getElementById('message-input');
+            textarea.addEventListener('input', function () {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+            });
+        }
+
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function sendQuickQuestion(question) {
+            document.getElementById('message-input').value = question;
+            sendMessage();
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            const message = messageInput.value.trim();
+
+            if (!message || isLoading) return;
+
+            addMessage(message, 'user');
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            setLoading(true);
+
+            try {
+                if (isStreaming) {
+                    await sendStreamingMessage(message);
+                } else {
+                    await sendRegularMessage(message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showError('Có lỗi xảy ra khi gửi tin nhắn. Vui lòng thử lại.');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function sendRegularMessage(message) {
+            const response = await fetch(`${API_BASE_URL}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    session_id: sessionId
+                })
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const data = await response.json();
+            addMessage(data.response, 'bot');
+        }
+
+        async function sendStreamingMessage(message) {
+                addTypingIndicator();
+
+                const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    removeTypingIndicator();
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let botMessage = '';
+                let botMessageElement = null;
+                let buffer = ''; // Thêm buffer để xử lý các dòng SSE không hoàn chỉnh
+
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true }); // Giải mã và thêm vào buffer
+
+                        // Xử lý từng dòng hoàn chỉnh trong buffer
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // Giữ lại dòng cuối cùng (có thể không hoàn chỉnh) trong buffer
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const rawData = line.substring(6).trim(); // Lấy phần sau 'data: ' và loại bỏ khoảng trắng
+
+                                if (rawData.length > 0) { // Đảm bảo có dữ liệu
+                                    if (rawData === '[DONE]') { // Xử lý tín hiệu kết thúc stream
+                                        break;
+                                    }
+                                    try {
+                                        const parsedData = JSON.parse(rawData); // Thử parse JSON
+
+                                        if (parsedData.content) { // Nếu có trường 'content'
+                                            if (!botMessageElement) {
+                                                removeTypingIndicator();
+                                                botMessageElement = addMessage('', 'bot', true);
+                                            }
+                                            botMessage += parsedData.content; // Nối nội dung
+                                            updateMessage(botMessageElement, botMessage);
+                                        } else if (parsedData.error) { // Nếu có trường 'error'
+                                            showError(`Lỗi từ bot: ${parsedData.error}`);
+                                        }
+                                    } catch (e) {
+                                        // Nếu không phải JSON hợp lệ (có thể là lỗi hoặc định dạng khác)
+                                        console.warn("Received non-JSON data or malformed JSON:", rawData, e);
+                                        if (!botMessageElement) {
+                                            removeTypingIndicator();
+                                            botMessageElement = addMessage('', 'bot', true);
+                                        }
+                                        botMessage += rawData; // Nối trực tiếp dữ liệu thô (có thể là lỗi)
+                                        updateMessage(botMessageElement, botMessage);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    removeTypingIndicator();
+                    console.error('Error during streaming:', error);
+                    showError('Có lỗi xảy ra khi nhận phản hồi stream.');
+                } finally {
+                    removeTypingIndicator(); // Đảm bảo ẩn typing indicator khi kết thúc
+                    setLoading(false); // Đảm bảo tắt loading
+                    scrollToBottom(); // Cuộn xuống cuối để thấy toàn bộ tin nhắn
+                }
+            }
+
+        function addMessage(content, sender, isStreaming = false) {
+            const messagesContainer = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.innerHTML = formatMessage(content);
+            messageDiv.appendChild(contentDiv);
+
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'message-time';
+            timeDiv.textContent = new Date().toLocaleTimeString('vi-VN');
+            messageDiv.appendChild(timeDiv);
+
+            messagesContainer.appendChild(messageDiv);
+            scrollToBottom();
+            return isStreaming ? messageDiv : null;
+        }
+
+        function updateMessage(messageElement, content) {
+            const contentDiv = messageElement.querySelector('div');
+            contentDiv.innerHTML = formatMessage(content);
+            scrollToBottom();
+        }
+
+        function formatMessage(content) {
+            return content
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+        }
+
+        function addTypingIndicator() {
+            const messagesContainer = document.getElementById('chat-messages');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'typing-indicator';
+            typingDiv.id = 'typing-indicator';
+            typingDiv.innerHTML = `
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            `;
+            messagesContainer.appendChild(typingDiv);
+            scrollToBottom();
+        }
+
+        function removeTypingIndicator() {
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingIndicator) typingIndicator.remove();
+        }
+
+        function setLoading(loading) {
+            isLoading = loading;
+            const sendButton = document.getElementById('send-button');
+            const messageInput = document.getElementById('message-input');
+
+            sendButton.disabled = loading;
+            messageInput.disabled = loading;
+            sendButton.innerHTML = loading ? '⏳' : '➤';
+        }
+
+        function scrollToBottom() {
+            const messagesContainer = document.getElementById('chat-messages');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function showError(message) {
+            const messagesContainer = document.getElementById('chat-messages');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = message;
+            messagesContainer.appendChild(errorDiv);
+            scrollToBottom();
+
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        async function clearHistory() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/history/${sessionId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    document.getElementById('chat-messages').innerHTML = `
+                        <div class="welcome-message">
+                            <h3>Lịch sử đã được xóa! 🎬</h3>
+                            <p>Bạn có thể bắt đầu cuộc trò chuyện mới.</p>
+                        </div>
+                    `;
+                } else {
+                    showError('Không thể xóa lịch sử. Vui lòng thử lại.');
+                }
+            } catch (error) {
+                console.error('Error clearing history:', error);
+                showError('Có lỗi xảy ra khi xóa lịch sử.');
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/history/${sessionId}`);
+
+                if (response.ok) {
+                    const messages = await response.json();
+                    const messagesContainer = document.getElementById('chat-messages');
+                    messagesContainer.innerHTML = '';
+
+                    if (messages.length === 0) {
+                        messagesContainer.innerHTML = `
+                            <div class="welcome-message">
+                                <h3>Không có lịch sử trò chuyện! 🎬</h3>
+                                <p>Hãy bắt đầu cuộc trò chuyện đầu tiên.</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    messages.forEach(msg => {
+                        if (msg.role !== 'system') {
+                            const sender = msg.role === 'human' ? 'user' : 'bot';
+                            addMessage(msg.content, sender);
+                        }
+                    });
+                } else {
+                    showError('Không thể tải lịch sử. Vui lòng thử lại.');
+                }
+            } catch (error) {
+                console.error('Error loading history:', error);
+                showError('Có lỗi xảy ra khi tải lịch sử.');
+            }
+        }
+
+        function toggleStream() {
+            isStreaming = !isStreaming;
+            const toggleElement = document.getElementById('stream-toggle');
+            toggleElement.textContent = `🔄 Stream: ${isStreaming ? 'ON' : 'OFF'}`;
+
+            toggleElement.parentElement.style.background = isStreaming
+                ? 'rgba(255, 255, 255, 0.2)'
+                : 'rgba(239, 68, 68, 0.2)';
+        }
+
+        // Connection status handlers
+        window.addEventListener('online', () => {
+            document.querySelector('.status-indicator').style.background = '#4ade80';
+        });
+
+        window.addEventListener('offline', () => {
+            document.querySelector('.status-indicator').style.background = '#ef4444';
+            showError('Mất kết nối internet. Vui lòng kiểm tra kết nối.');
+        });
+    </script>
+</body>
+
+</html>
