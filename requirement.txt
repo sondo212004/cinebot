@@ -6,7 +6,7 @@ numpy
 kagglehub
 
 # Gradio for web interface
-gradio
+#gradio
 
 # LangChain ecosystem
 langchain
@@ -55,13 +55,13 @@ langgraph
 langsmith
 
 # MCP
-mcp-use
-langchain-mcp-adapters
+#mcp-use
+#langchain-mcp-adapters
 
 # playwright
 playwright
 # Tải về các trình duyệt cần thiết (Chromium, Firefox, WebKit)
-playwright install
+#playwright install
 
 # pydantic
 pydantic

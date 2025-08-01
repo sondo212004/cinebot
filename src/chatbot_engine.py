@@ -40,7 +40,6 @@ try:
     from web_search_agent import web_search_tool
     from cinema_search import cinema_search_tool
     from tmdb_tools import tmdb_tools
-    from scrape_cinema_showtimes import cinema_showtimes_tool
     from playwright_browser import scrape_cinema_showtimes_playwright
 except ImportError:
     print("⚠️ Không tìm thấy web_search_agent.py, cinema_search.py, tmdb_tools.py, mcp_tools.py, tạo tool giả lập.")
@@ -209,8 +208,6 @@ class ChatbotEngine:
             tools.append(cinema_search_tool)
         if tmdb_tools:
             tools.extend(tmdb_tools)
-        # if cinema_showtimes_tool:
-        #     tools.append(cinema_showtimes_tool)
         if scrape_cinema_showtimes_playwright:
             tools.append(scrape_cinema_showtimes_playwright)
         
