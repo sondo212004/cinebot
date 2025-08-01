@@ -94,6 +94,17 @@ CineBot được xây dựng trên một kiến trúc module, cho phép mở r�
 
 ---
 
+## Lưu Ý Quan Trọng Về Phiên Bản Dự Án
+**Bạn đang xem phiên bản main của CineBot, sử dụng kiến trúc LangChain Agent truyền thống và Selenium cho web scraping, với giao diện Gradio UI đơn giản.**
+
+**Để trải nghiệm phiên bản mới nhất và mạnh mẽ hơn, vui lòng chuyển sang branch develop:** https://github.com/sondo212004/cinebot/tree/develop
+**Phiên bản develop:**
+* **Kiến trúc Agent:** Đã chuyển đổi sang LangGraph để có luồng xử lý và kiểm soát trạng thái tốt hơn.
+* **Web Scraping:** Đã thay thế Selenium bằng Playwright để cải thiện hiệu suất và độ ổn định.
+* **Backend:** Đã thêm FastAPI Backend với hỗ trợ streaming (Server-Sent Events) cho giao diện web hiện đại.
+* **Giao diện:** Sử dụng giao diện web tùy chỉnh (ui/chatbot_ui.html) tương tác qua FastAPI. 
+
+---
 ## Liên Hệ
 
 Nếu có bất kỳ câu hỏi hoặc góp ý nào, vui lòng liên hệ qua:
