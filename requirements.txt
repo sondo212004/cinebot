@@ -5,9 +5,6 @@ numpy
 # Kaggle integration
 kagglehub
 
-# Gradio for web interface
-#gradio
-
 # LangChain ecosystem
 langchain
 langchain-openai
@@ -36,35 +33,20 @@ requests==2.31.0
 beautifulsoup4==4.12.3
 lxml==4.9.3
 urllib3==2.1.0
-selenium==4.15.0
 fake-useragent==1.4.0
 
-# Optional: For TMDB API (comment/uncomment as needed)
-# tmdbv3api==1.7.7
-
-# Optional: For News API (comment/uncomment as needed)
+# Optional APIs
+tmdbv3api==1.7.7
 # newsapi-python==0.2.6
 
-# Others
-webdriver-manager
-
-# langgraph (update)
+# LangGraph
 langgraph
-
-# langsmith
 langsmith
 
-# MCP
-#mcp-use
-#langchain-mcp-adapters
-
-# playwright
+# Playwright
 playwright
-# Tải về các trình duyệt cần thiết (Chromium, Firefox, WebKit)
-#playwright install
 
-# pydantic
-pydantic
-
-#fastapi
+# FastAPI
 fastapi
+pydantic
+aiofiles

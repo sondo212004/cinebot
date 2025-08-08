@@ -185,7 +185,6 @@ class ChatbotEngine:
         print(f"✅ Database có {vector_db._collection.count()} documents")
         
         llm = ChatOpenAI(
-            temperature=0.3,
             model_name=self.MODEL,
             max_tokens=800,
             streaming=True
