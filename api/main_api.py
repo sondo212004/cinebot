@@ -1,14 +1,20 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import HTTPException
 from typing import AsyncGenerator
-import sys
 import os
 import json
 import uuid
+import sys
+import asyncio
+
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 
 # Thêm đường dẫn thư mục src vào Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -46,8 +52,8 @@ def root():
     return {"message": "CineBot API đang hoạt động 🎬"}
 
 @app.post("/chat")
-def chat(request: ChatRequest):
-    response = engine.get_response(request.message, request.session_id)
+async def chat(request: ChatRequest):
+    response = await engine.get_response(request.message, request.session_id)
     return {"response": response}
 
 @app.post("/chat/stream")

@@ -1,8 +1,14 @@
+import asyncio
+import sys
 import os
 from dotenv import load_dotenv
 from typing import List, Dict, Any, TypedDict, Annotated
 import json
-import asyncio
+import traceback
+
+
+
+
 
 # LangChain core imports
 from langchain_openai import ChatOpenAI
@@ -40,7 +46,7 @@ try:
     from web_search_agent import web_search_tool
     from cinema_search import cinema_search_tool
     from tmdb_tools import tmdb_tools
-    from playwright_browser import scrape_cinema_showtimes_playwright
+    from playwright_browser import cinema_showtimes_tool
 except ImportError:
     print("⚠️ Không tìm thấy web_search_agent.py, cinema_search.py, tmdb_tools.py, mcp_tools.py, tạo tool giả lập.")
     from langchain.tools import DuckDuckGoSearchRun
@@ -108,6 +114,7 @@ class ChatbotEngine:
                 * Ví dụ: Nếu rạp là "CGV Vincom Center Bà Triệu", hãy tìm `web_search_tool("lịch chiếu CGV Vincom Center Bà Triệu URL")` hoặc `web_search_tool("trang chính thức CGV Vincom Center Bà Triệu")`.
             * Sau đó, **PHÂN TÍCH KẾT QUẢ TỪ `web_search_tool` để TRÍCH XUẤT URL TRANG LỊCH CHIẾU CHÍNH XÁC.** (Đảm bảo là link từ miền chính thức của rạp như `cgv.vn`, `lottecinemavn.com`, `bhdstar.vn`).
             * Hiện tại chỉ hỗ trợ cho rạp CGV, nên hãy lấy url ví dụ:https://www.cgv.vn/en/cinox/site/cgv-vincom-tran-duy-hung
+            * Tuyệt đối lấy url có dạng: :https://www.cgv.vn/en/cinox/site/cgv từ rạp cgv
 
         2.  **Nếu người dùng CHỈ NÊU TÊN PHIM VÀ ĐỊA ĐIỂM CHUNG** (ví dụ: "phim X ở Hà Nội", "phim Y ở gần đây", "lịch chiếu ở quận Hoàn Kiếm"):
             * **SỬ DỤNG CÔNG CỤ `cinema_search_tool`** với `movie_name` và `location` (nếu có) để tìm danh sách các rạp đang chiếu phim đó ở khu vực gần người dùng. Công cụ này sẽ trả về **TÊN RẠP** và **ĐỊA CHỈ**.
@@ -115,9 +122,14 @@ class ChatbotEngine:
             * Sau đó, tương tự như bước 1, **SỬ DỤNG `web_search_tool`** để tìm URL TRANG LỊCH CHIẾU CỤ THỂ của các rạp đã chọn.
 
         3.  **Sau khi đã có `specific_cinema_url` (từ `web_search_tool` hoặc từ prompt của người dùng):**
-            * **SỬ DỤNG CÔNG CỤ `scrape_cinema_showtimes_playwright`** để lấy lịch chiếu chi tiết từ URL đó.
-            * **RẤT QUAN TRỌNG:** Truyền một `task_description` rõ ràng cho công cụ này, bao gồm URL, ngày muốn xem (nếu có, ví dụ: "ngày hôm nay", "ngày mai", "29/07/2025"), và yêu cầu trích xuất thông tin (tên phim, giờ chiếu, định dạng, link đặt vé) dưới dạng JSON list.
-            * Ví dụ: `scrape_cinema_showtimes_playwright(url="https://en.wikipedia.org/wiki/Rapping", target_date="[Ngày cần tìm]", extract_format="json")`.
+            * ** sử dụng mẫu sau để tìm các tham số phù hợp đưa và hàm `scrape_cinema_showtimes` của tool cinema_showtimes_tool:**result = scrape_cinema_showtimes(
+                    specific_cinema_url="https://www.cgv.vn/default/cinox/site/cgv-vincom-tran-duy-hung/",
+                    cinema_info={
+                        "name": "CGV Vincom Trần Duy Hưng",
+                        "location": "Hà Nội",
+                        "source_url": "https://www.cgv.vn/default/cinox/site/cgv-vincom-tran-duy-hung/"
+                    }
+                )
 
         4.  **Sau khi công cụ scrape trả về dữ liệu lịch chiếu (dạng string JSON):**
             * Bạn **HÃY PHÂN TÍCH DỮ LIỆU ĐÓ và TỔNG HỢP, SẮP XẾP, TRÌNH BÀY THÔNG TIN** một cách rõ ràng, đầy đủ và thân thiện cho người dùng.
@@ -207,8 +219,8 @@ class ChatbotEngine:
             tools.append(cinema_search_tool)
         if tmdb_tools:
             tools.extend(tmdb_tools)
-        if scrape_cinema_showtimes_playwright:
-            tools.append(scrape_cinema_showtimes_playwright)
+        if cinema_showtimes_tool:
+            tools.append(cinema_showtimes_tool)
         
         print("✅ Tất cả components đã sẵn sàng!")
         return llm, retriever, tools
@@ -216,23 +228,21 @@ class ChatbotEngine:
     def _create_workflow(self):
         print("✨ Tạo LangGraph workflow...")
         
-        # Tạo workflow graph
-        workflow = StateGraph(AgentState)
+        # Tạo workflow graph async
+        workflow = StateGraph(AgentState)  
         
         # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
         
-        # Định nghĩa node chatbot
-        def chatbot(state: AgentState):
-            # Thêm system message vào đầu
+        # Định nghĩa node chatbot async
+        async def chatbot(state: AgentState):  
             messages = [SystemMessage(content=self.SYSTEM_PROMPT)] + state["messages"]
-            response = llm_with_tools.invoke(messages)
+            response = await llm_with_tools.ainvoke(messages)  
             return {"messages": [response]}
         
         # Thêm nodes vào workflow
         workflow.add_node("chatbot", chatbot)
-        workflow.add_node("tools", ToolNode(self.tools))
-        
+        workflow.add_node("tools", ToolNode(self.tools))  
         # Thiết lập entry point
         workflow.add_edge(START, "chatbot")
         
@@ -248,13 +258,9 @@ class ChatbotEngine:
         
         return workflow
 
-    def get_response(self, message: str, session_id: str = "default_session"):
+    async def get_response(self, message: str, session_id: str = "default_session"):  
         """
         Lấy response từ LangGraph agent
-        
-        Args:
-            message: Tin nhắn của người dùng
-            session_id: ID phiên để lưu trữ lịch sử
         """
         if not message.strip():
             return "Vui lòng nhập câu hỏi của bạn! 🎬"
@@ -267,7 +273,7 @@ class ChatbotEngine:
             print(f"\n🎬 INPUT: {message}")
             
             # Invoke workflow với message mới
-            response = self.app.invoke(
+            response = await self.app.ainvoke(  
                 {"messages": [HumanMessage(content=message)]},
                 config=config
             )
@@ -280,7 +286,6 @@ class ChatbotEngine:
                 return "Xin lỗi, tôi không thể tạo ra câu trả lời."
                 
         except Exception as e:
-            import traceback
             traceback.print_exc()
             return f"❌ Lỗi: {str(e)}"
 
@@ -289,21 +294,18 @@ class ChatbotEngine:
         Xóa lịch sử trò chuyện cho một session cụ thể
         """
         try:
-            # Với MemorySaver, chúng ta có thể xóa bằng cách tạo session mới
-            # Hoặc có thể implement logic xóa riêng nếu cần
             print(f"🗑️ Đã xóa lịch sử trò chuyện cho session: {session_id}")
             return "🔄 Đã xóa lịch sử trò chuyện!"
         except Exception as e:
             return f"❌ Lỗi khi xóa lịch sử: {str(e)}"
 
-    def get_conversation_history(self, session_id: str = "default_session"):
+    def get_conversation_history(self, session_id: str = "default_session"):  # SỬA: Làm async nếu cần
         """
         Lấy lịch sử trò chuyện cho một session
         """
         try:
             config = {"configurable": {"thread_id": session_id}}
-            # Lấy state hiện tại
-            current_state = self.app.get_state(config)
+            current_state = self.app.aget_state(config)  
             if current_state and current_state.values.get("messages"):
                 return current_state.values["messages"]
             return []
@@ -330,7 +332,3 @@ class ChatbotEngine:
                         yield last_message.content
         except Exception as e:
             yield f"❌ Đã xảy ra lỗi: {str(e)}"
-
-                        
-        except Exception as e:
-            yield f"❌ Lỗi: {str(e)}"
