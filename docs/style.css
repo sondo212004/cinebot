@@ -1,0 +1,226 @@
+* {
+  box-sizing: border-box;
+  transition: 0.35s ease;
+}
+
+.rela-block {
+  display: block;
+  position: relative;
+  margin: auto;
+}
+
+.rela-inline {
+  display: inline-block;
+  position: relative;
+  margin: auto;
+}
+
+.floated {
+  display: inline-block;
+  position: relative;
+  float: left;
+}
+
+.abs-center {
+  position: absolute;
+  top: 25%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  width: 88%;
+}
+
+body {
+  font-family: 'Open Sans';
+  font-size: 14px;
+  letter-spacing: 0;
+  font-weight: 400;
+  line-height: 14px;
+  background: url("http://kingofwallpapers.com/leaves/leaves-016.jpg") right no-repeat;
+  background-size: cover;
+}
+
+body:before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.92);
+}
+
+.caps {
+  text-transform: uppercase;
+}
+
+.justified {
+  text-align: justify;
+}
+
+p.light {
+  color: #777;
+}
+
+h2 {
+  font-family: 'Open Sans';
+  font-size: 24px;
+  letter-spacing: 5px;
+  font-weight: 600;
+  line-height: 30px;
+  color: #000;
+}
+
+h3 {
+  font-family: 'Open Sans';
+  font-size: 21px;
+  letter-spacing: 1px;
+  font-weight: 600;
+  line-height: 15px;
+  color: #000;
+}
+
+.page {
+  width: 100%;
+  height: 100vh;
+  margin: 0;
+  background-color: #fff;
+  box-shadow: none;
+}
+
+.top-bar {
+  height: 150px;
+  background-color: #848484;
+  color: #fff;
+}
+
+.name {
+  position: absolute;
+  left: calc(200px + 5%);
+  right: 0;
+  height: 90px;
+  text-align: center;
+  font-family: 'Raleway';
+  font-size: 32px;
+  letter-spacing: 8px;
+  font-weight: 100;
+  line-height: 60px;
+}
+
+.name div {
+  width: 94%;
+}
+
+.side-bar {
+  position: absolute;
+  top: 40px;
+  left: 1%;
+  bottom: 40px;
+  width: 150px;
+  background-color: #f7e0c1;
+  padding: 220px 3px 2px;
+}
+
+.mugshot {
+  position: absolute;
+  top: 50px;
+  left: 25px;
+  height: 100px;
+  width: 100px;
+}
+
+.mugshot .logo {
+  margin: 0;
+}
+
+.logo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  color: #000;
+  height: 120px;
+  width: 120px;
+}
+
+.logo .logo-svg {
+  height: 100%;
+  width: 100%;
+  stroke: #000;
+  cursor: pointer;
+}
+
+.logo .logo-text {
+  position: absolute;
+  top: 45%;
+  right: 16%;
+  cursor: pointer;
+  font-family: "Montserrat";
+  font-size: 25px;
+  font-weight: 400;
+  line-height: 58px;
+}
+
+.social {
+  padding-left: 25px;
+  margin-bottom: 25px;
+  cursor: pointer;
+  position: relative;
+}
+
+.social:before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 0;
+  height: 20px;
+  width: 20px;
+  background-size: cover !important;
+}
+
+.social.twitter:before {
+  background: url("https://cdn4.iconfinder.com/data/icons/iconsimple-logotypes/512/github-256.png") center no-repeat;
+}
+
+.social.github:before {
+  background: url("https://cdn3.iconfinder.com/data/icons/social-media-2026/60/Socialmedia_icons_Pinterest-23-128.png") center no-repeat;
+}
+
+.social.linked-in:before {
+  background: url("https://cdn3.iconfinder.com/data/icons/social-media-2026/60/Socialmedia_icons_LinkedIn-128.png") center no-repeat;
+}
+
+.side-header {
+  font-family: 'Open Sans';
+  font-size: 18px;
+  letter-spacing: 1px;
+  font-weight: 600;
+  line-height: 21px;
+  margin: 40px auto 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #888;
+}
+
+.list-thing {
+  padding-left: 25px;
+  margin-bottom: 10px;
+}
+
+.content-container {
+  margin-right: 0;
+  width: calc(95% - 150px);
+  padding: 25px 20px 50px;
+}
+
+.content-container > * {
+  margin: 0 auto 15px;
+}
+
+.content-container > h3 {
+  margin: 0 auto 10px;
+}
+
+.contact-block {
+  position: relative;
+  text-align: center;
+  width: 88%;
